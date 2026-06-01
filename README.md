@@ -147,7 +147,7 @@ Critical rules: keep SBERT frozen, always use `torch.cuda.amp`, batch size 4–8
 ## Setup
 
 ```bash
-git clone https://github.com/<prish2410>/sass-tad.git
+git clone https://github.com/prish2410/sass-tad.git
 cd sass-tad
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
