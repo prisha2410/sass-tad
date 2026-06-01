@@ -128,21 +128,6 @@ sass-tad/
 └── README.md
 ```
 
----
-
-## Hardware
-
-All training and inference runs on an **NVIDIA GeForce RTX 3050 (4 GB VRAM)**.
-
-| Component | Est. VRAM | Strategy |
-|-----------|-----------|----------|
-| SBERT (frozen) | ~90 MB | Precompute once → cache as `.pt` |
-| Stylometric extraction | 0 MB | CPU only |
-| Fusion + Contrastive + GRL + BiLSTM | ~1.5–2.5 GB | fp16 mixed precision |
-
-Critical rules: keep SBERT frozen, always use `torch.cuda.amp`, batch size 4–8.
-
----
 
 ## Setup
 
