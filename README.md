@@ -67,14 +67,24 @@ Three core innovations over existing PAN systems:
 
 ## Datasets
 
-| Dataset | Tier | Notes |
-|---------|------|-------|
-| PAN 2023 | Easy / Medium / Hard | Primary benchmark |
-| PAN 2024 | Easy / Medium / Hard | Extended benchmark |
-| PAN 2025 | TBD | If available |
-| MuLD AO3 | Cross-domain | Generalisation evaluation |
+| Dataset | Granularity | Tiers | Access | DOI / Link |
+|---------|-------------|-------|--------|------------|
+| PAN 2023 | Paragraph-level | Easy / Medium / Hard | TIRA registration → Zenodo request | [zenodo.org/records/7729178](https://zenodo.org/records/7729178) |
+| PAN 2024 | Sentence-level | Easy / Medium / Hard | TIRA registration → Zenodo request | [pan.webis.de/clef24](https://pan.webis.de/clef24/pan24-web/style-change-detection.html) |
+| PAN 2025 | Sentence-level | Easy / Medium / Hard | TIRA registration → Zenodo request | [zenodo.org/records/14891299](https://zenodo.org/records/14891299) |
+| MuLD AO3 | Paragraph-level | Cross-domain | HuggingFace (open, no registration) | [ghomasHudson/muld](https://huggingface.co/datasets/ghomasHudson/muld) |
 
-Data is **not committed** to this repo. See `docs/data_acquisition.md` for download instructions.
+> **Access note for PAN datasets:** Register at [tira.io](https://www.tira.io), then request dataset access on Zenodo using the **same email address**. Datasets contain copyrighted material — research use only, no redistribution.
+
+```python
+# MuLD AO3 — loads directly, no registration needed
+from datasets import load_dataset
+ds = load_dataset("ghomasHudson/muld", "AO3 Style Change Detection")
+```
+
+> **Note on granularity:** PAN 2023 operates at paragraph level; PAN 2024/2025 advance to sentence level — matching our task formulation. All three are used: 2023 for cross-granularity analysis, 2024/2025 as primary benchmarks.
+
+Data is **not committed** to this repo. See `docs/data_acquisition.md` for full download instructions.
 
 ---
 
@@ -130,37 +140,10 @@ sass-tad/
 
 ---
 
-## Hardware
-
-All training and inference runs on an **NVIDIA GeForce RTX 3050 (4 GB VRAM)**.
-
-| Component | Est. VRAM | Strategy |
-|-----------|-----------|----------|
-| SBERT (frozen) | ~90 MB | Precompute once → cache as `.pt` |
-| Stylometric extraction | 0 MB | CPU only |
-| Fusion + Contrastive + GRL + BiLSTM | ~1.5–2.5 GB | fp16 mixed precision |
-
-Critical rules: keep SBERT frozen, always use `torch.cuda.amp`, batch size 4–8.
-
----
-
-## Project Timeline
-
-| Phase | Stage |
-|-------|-------|
-| 1 | Literature Review |
-| 2 | Dataset & Feature Pipeline | 
-| 3 | Baselines (SBERT / stylometric / naive fusion) | 
-| 4 | SASS-TAD Implementation |
-| 5 | Evaluation & Explainability |
-| 6 | Writing & Submission | 
-
----
-
 ## Setup
 
 ```bash
-git clone https://github.com/<prish2410>/sass-tad.git
+git clone https://github.com/prisha2410/sass-tad.git
 cd sass-tad
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
