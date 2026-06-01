@@ -144,19 +144,6 @@ Critical rules: keep SBERT frozen, always use `torch.cuda.amp`, batch size 4–8
 
 ---
 
-## Project Timeline
-
-| Phase | Stage |
-|-------|-------|
-| 1 | Literature Review |
-| 2 | Dataset & Feature Pipeline | 
-| 3 | Baselines (SBERT / stylometric / naive fusion) | 
-| 4 | SASS-TAD Implementation |
-| 5 | Evaluation & Explainability |
-| 6 | Writing & Submission | 
-
----
-
 ## Setup
 
 ```bash
