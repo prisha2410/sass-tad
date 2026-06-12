@@ -293,21 +293,37 @@ class MuLDDataset:
 
     def _parse_split(self, split_ds, split_name: str) -> None:
         for idx, row in enumerate(split_ds):
-            doc_id    = f"muld_ao3_{split_name}_{idx}"
-            text      = row.get("document", "") or row.get("text", "")
+            doc_id = f"muld_ao3_{split_name}_{idx}"
+
+            # MuLD AO3 uses 'input' for text, 'metadata' for labels
+            text = row.get("input", "") or row.get("document", "") or row.get("text", "")
             sentences = [s.strip() for s in text.split("\n") if s.strip()]
 
             boundary_labels = None
-            label_raw = row.get("summary", None) or row.get("label", None)
-            if label_raw is not None:
+            n_authors = None
+
+            # Labels in 'metadata' JSON: {"authors": 1, "changes": [false, false, ...]}
+            metadata_raw = row.get("metadata", None)
+            if metadata_raw is not None:
                 try:
-                    parsed = json.loads(label_raw) if isinstance(label_raw, str) else label_raw
-                    if isinstance(parsed, list):
-                        boundary_labels = [int(x) for x in parsed]
-                    elif isinstance(parsed, dict):
-                        boundary_labels = parsed.get("changes", None)
+                    meta = json.loads(metadata_raw) if isinstance(metadata_raw, str) else metadata_raw
+                    changes = meta.get("changes", None)
+                    if changes is not None:
+                        boundary_labels = [int(x) for x in changes]
+                    n_authors = meta.get("authors", None)
                 except (json.JSONDecodeError, TypeError):
                     boundary_labels = None
+
+            # Fallback: output field
+            if boundary_labels is None:
+                label_raw = row.get("output", None)
+                if label_raw is not None:
+                    try:
+                        parsed = json.loads(label_raw) if isinstance(label_raw, str) else label_raw
+                        if isinstance(parsed, list):
+                            boundary_labels = [int(x) for x in parsed]
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        boundary_labels = None
 
             if boundary_labels is not None:
                 self._documents.append(Document(
