@@ -109,11 +109,21 @@ class Document:
 
 Tier  = Literal["easy", "medium", "hard"]
 
-# PAN 2023 uses dataset1/2/3; 2024 and 2025 use easy/medium/hard directly
+# PAN 2023 has deeply nested folders; 2024/2025 use flat easy/medium/hard
 _PAN_TIER_DIRS = {
-    "pan2023": {"easy": "dataset1", "medium": "dataset2", "hard": "dataset3"},
-    "pan2024": {"easy": "easy",     "medium": "medium",   "hard": "hard"},
-    "pan2025": {"easy": "easy",     "medium": "medium",   "hard": "hard"},
+    "pan2023": {"easy": "pan23-multi-author-analysis-dataset1",
+                "medium": "pan23-multi-author-analysis-dataset2",
+                "hard": "pan23-multi-author-analysis-dataset3"},
+    "pan2024": {"easy": "easy",   "medium": "medium", "hard": "hard"},
+    "pan2025": {"easy": "easy",   "medium": "medium", "hard": "hard"},
+}
+
+# PAN 2023 split folders are named e.g. "pan23-multi-author-analysis-dataset1-train"
+# PAN 2024/2025 split folders are named "train" / "validation"
+_PAN_SPLIT_DIRNAME = {
+    "pan2023": lambda tier_dir, split: f"{tier_dir}-{split}",
+    "pan2024": lambda tier_dir, split: split,
+    "pan2025": lambda tier_dir, split: split,
 }
 
 
@@ -197,7 +207,10 @@ class PANDataset:
             )
 
     def _load_split(self, pan_split: str) -> List[Document]:
-        split_dir = self._tier_dir / pan_split
+        split_dirname = _PAN_SPLIT_DIRNAME[self._source](
+            self._tier_dir.name, pan_split
+        )
+        split_dir = self._tier_dir / split_dirname
         if not split_dir.exists():
             return []
 
