@@ -111,17 +111,19 @@ Tier  = Literal["easy", "medium", "hard"]
 
 # PAN 2023 has deeply nested folders; 2024/2025 use flat easy/medium/hard
 _PAN_TIER_DIRS = {
-    "pan2023": {"easy": "pan23-multi-author-analysis-dataset1",
-                "medium": "pan23-multi-author-analysis-dataset2",
-                "hard": "pan23-multi-author-analysis-dataset3"},
+    "pan2023": {"easy": "easy",   "medium": "medium", "hard": "hard"},
     "pan2024": {"easy": "easy",   "medium": "medium", "hard": "hard"},
     "pan2025": {"easy": "easy",   "medium": "medium", "hard": "hard"},
 }
 
-# PAN 2023 split folders are named e.g. "pan23-multi-author-analysis-dataset1-train"
-# PAN 2024/2025 split folders are named "train" / "validation"
+_PAN2023_SPLIT_NAMES = {
+    "easy": "pan23-multi-author-analysis-dataset1",
+    "medium": "pan23-multi-author-analysis-dataset2",
+    "hard": "pan23-multi-author-analysis-dataset3",
+}
+
 _PAN_SPLIT_DIRNAME = {
-    "pan2023": lambda tier_dir, split: f"{tier_dir}-{split}",
+    "pan2023": lambda tier_dir, split: f"{_PAN2023_SPLIT_NAMES[tier_dir]}-{split}",
     "pan2024": lambda tier_dir, split: split,
     "pan2025": lambda tier_dir, split: split,
 }

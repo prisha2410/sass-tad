@@ -46,6 +46,7 @@ class SASTADTrainer:
         max_beta: float = 0.3,
         max_gamma: float = 0.1,
         max_grl_lambda: float = 1.0,
+        disable_contrastive: bool = False,
     ):
         self.model = model.to(device)
         self.loss_fn = loss_fn.to(device)
@@ -65,6 +66,7 @@ class SASTADTrainer:
         self.max_beta = max_beta
         self.max_gamma = max_gamma
         self.max_grl_lambda = max_grl_lambda
+        self.disable_contrastive = disable_contrastive
 
         self.scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
         self.best_wd = float("inf")
@@ -78,12 +80,15 @@ class SASTADTrainer:
         contrastive_end = self.boundary_only_epochs + self.contrastive_ramp_epochs
         if epoch < contrastive_end:
             p = (epoch - self.boundary_only_epochs) / self.contrastive_ramp_epochs
-            return self.max_beta * p, 0.0, 0.0
+            beta = 0.0 if self.disable_contrastive else self.max_beta * p
+            return beta, 0.0, 0.0
         adv_end = contrastive_end + self.adversarial_ramp_epochs
         if epoch < adv_end:
             p = (epoch - contrastive_end) / self.adversarial_ramp_epochs
-            return self.max_beta, self.max_gamma * p, self.max_grl_lambda * p
-        return self.max_beta, self.max_gamma, self.max_grl_lambda
+            beta = 0.0 if self.disable_contrastive else self.max_beta
+            return beta, self.max_gamma * p, self.max_grl_lambda * p
+        beta = 0.0 if self.disable_contrastive else self.max_beta
+        return beta, self.max_gamma, self.max_grl_lambda
 
     def train_epoch(self, dataloader: DataLoader, epoch: int) -> Dict[str, float]:
         self.model.train()
@@ -229,6 +234,8 @@ class SASTADTrainer:
         print(f"Curriculum: boundary={self.boundary_only_epochs}ep, "
               f"contrastive={self.contrastive_ramp_epochs}ep, "
               f"adversarial={self.adversarial_ramp_epochs}ep")
+        if self.disable_contrastive:
+            print("Contrastive loss: DISABLED (beta forced to 0.0)")
         print("=" * 70)
 
         for epoch in range(self.max_epochs):

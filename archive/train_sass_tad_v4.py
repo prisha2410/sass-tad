@@ -4,9 +4,11 @@ Train SASS-TAD v4 — CRF + NER masking + stronger regularization.
 Usage:
     python scripts/train_sass_tad_v4.py
     python scripts/train_sass_tad_v4.py --no-ner-mask --no-crf
+    python scripts/train_sass_tad_v4.py --no-contrastive --no-adversarial
 """
 
 import argparse
+import json
 import torch
 from torch.utils.data import DataLoader
 from pathlib import Path
@@ -31,8 +33,10 @@ def main():
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--no-adversarial", action="store_true")
     parser.add_argument("--no-crf", action="store_true")
+    parser.add_argument("--no-contrastive", action="store_true")
     parser.add_argument("--no-ner-mask", action="store_true")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--results-file", default="results/ablations.json")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -101,6 +105,7 @@ def main():
     )
     print(f"Model: {model.count_parameters():,} parameters")
     print(f"CRF: {model.use_crf} | Adversarial: {not args.no_adversarial}")
+    print(f"Contrastive: {not args.no_contrastive}")
     print(f"NER masking: {not args.no_ner_mask}")
 
     loss_fn = SASTADLoss(
@@ -123,6 +128,7 @@ def main():
         boundary_only_epochs=10,
         contrastive_ramp_epochs=5,
         adversarial_ramp_epochs=5,
+        disable_contrastive=args.no_contrastive,
     )
 
     history = trainer.fit(train_loader, val_loader)
@@ -159,6 +165,38 @@ def main():
     print(f"SASS-TAD v2:       F1=0.583  WD=0.438")
     print(f"SASS-TAD v3:       F1=0.574  WD=0.439")
     print(f"SASS-TAD v4:       F1={test_metrics['f1']:.3f}  WD={test_metrics['window_diff']:.3f}")
+
+    # Save results
+    config = {
+        "model": "sass_tad_v4",
+        "crf": not args.no_crf,
+        "adversarial": not args.no_adversarial,
+        "contrastive": not args.no_contrastive,
+        "ner_masking": not args.no_ner_mask,
+        "year": args.year,
+        "tier": args.tier,
+    }
+    result_entry = {
+        "config": config,
+        "metrics": {
+            "f1": round(test_metrics["f1"], 4),
+            "window_diff": round(test_metrics["window_diff"], 4),
+            "precision": round(test_metrics["precision"], 4),
+            "recall": round(test_metrics["recall"], 4),
+        },
+    }
+
+    results_path = Path(args.results_file)
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    if results_path.exists():
+        with open(results_path) as f:
+            all_results = json.load(f)
+    else:
+        all_results = []
+    all_results.append(result_entry)
+    with open(results_path, "w") as f:
+        json.dump(all_results, f, indent=2)
+    print(f"Results saved to {results_path}")
 
 
 if __name__ == "__main__":
