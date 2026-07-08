@@ -2,8 +2,6 @@
 
 **DeBERTa-Stylometric Attention Fusion for Style Change Detection in Topic-Controlled Multi-Author Documents**
 
-*Targeting: Expert Systems with Applications (IF ~8.5)*
-
 ---
 
 ## The Problem
