@@ -1,141 +1,184 @@
-# SASS-TAD
+# DeSAF
 
-**Sequence-Aware Stylometric-Semantic Fusion for Topic-Controlled Authorship Change Detection in Multi-Author Documents**
+**DeBERTa-Stylometric Attention Fusion for Style Change Detection in Topic-Controlled Multi-Author Documents**
 
-*NLP / Stylometry*
+*Targeting: Expert Systems with Applications (IF ~8.5)*
 
 ---
 
 ## The Problem
 
-Style change detection systems work well when different authors write about different topics. They break down when multiple authors write about the **same topic** — because semantic embeddings like SBERT conflate topic similarity with authorial similarity, making it impossible to distinguish a genuine authorship boundary from a mere topic continuation.
+Style change detection breaks down when multiple authors write about the **same topic** — semantic embeddings conflate topic similarity with authorial similarity. The PAN 2024/2025 Hard tier formally quantifies this: systems strong on Easy (topic-diverse) documents experience major F1 degradation on Hard (topic-controlled) documents.
 
-The PAN 2023/24 benchmarks formally quantify this: systems strong on Easy-tier (topic-diverse) documents experience major F1 degradation on Hard-tier (strictly topic-controlled) documents.
-
-**SASS-TAD directly attacks this gap.**
+**DeSAF directly attacks this gap.**
 
 ---
 
-## Proposed Architecture
+## Architecture
 
 ```
 Document (N sentences)
         │
         ▼
-┌───────────────────────────────────────────────────┐
-│              Dual-Channel Extraction               │
-│   SBERT embeddings (GPU)  │  Stylometric (CPU)    │
-└───────────────┬───────────┴──────────┬────────────┘
-                │                      │
-                └──────────┬───────────┘
-                           ▼
-                  Feature Fusion Layer
-                           │
-                           ▼
-               Contrastive Style Encoder
-          (same-author pairs ↔ diff-author pairs)
-                           │
-                           ▼
-              Topic-Adversarial Layer (GRL)
-            (style encoder learns to forget topic)
-                           │
-                           ▼
-              Sequence-Aware BiLSTM Classifier
-                           │
-                           ▼
-             Per-boundary probability + SHAP / IG
+┌─────────────────────────────────────────┐
+│         DeBERTa-v3-small (frozen)       │
+│   Sentence-pair → CLS vector (768-dim)  │
+└──────────────────┬──────────────────────┘
+                   │
+        ┌──────────┴──────────┐
+        │                     │
+   CLS (768)           Stylometric diff
+                          (193-dim)
+        │                     │
+        └──────────┬──────────┘
+                   ▼
+      StyleAttentionFusion
+      (gated attention: style weighted
+       by CLS context → 961-dim fused)
+                   │
+                   ▼
+         BiLSTM over boundary sequence
+                   │
+                   ▼
+          Per-boundary logit → sigmoid
 ```
 
-Three core innovations over existing PAN systems:
-
-1. **Contrastive Style Encoder** — pulls same-author representations together, pushes different-author ones apart in a topic-agnostic embedding space.
-2. **Topic-Adversarial Disentanglement** — a Gradient Reversal Layer forces the style encoder to maximally predict authorship boundaries while minimally predicting topic labels.
-3. **Sequence-Aware BiLSTM** — models boundary patterns across neighbouring sentences rather than classifying each boundary independently.
+**Key design choices:**
+- DeBERTa-v3-small fine-tuned end-to-end with curriculum learning (Easy→Medium→Hard, 2-2-8 epoch schedule)
+- 193-dim stylometric features: POS ratios, function word frequencies, readability scores, surface features
+- Gated attention fusion: stylometric features weighted by DeBERTa CLS context
+- Hard-tier oversampling (3×) via WeightedRandomSampler to address class imbalance
+- Decision threshold optimised on validation set (best = 0.40)
 
 ---
 
-## Research Questions
+## Results
 
-| # | Question |
-|---|----------|
-| RQ1 | Do topic-independent stylometric features outperform SBERT alone on Medium/Hard PAN tiers? |
-| RQ2 | Does sequence-aware BiLSTM outperform independent boundary classifiers (LR, SVM)? |
-| RQ3 | Which stylometric features remain stable under strict topic control? |
-| RQ4 | Does explicit topic-adversarial disentanglement improve Hard-tier detection over non-adversarial baselines? |
+All numbers are on the **test set** with threshold = 0.40.
+
+| Dataset | Val F1 | Test F1 |
+|---------|--------|---------|
+| 2024 Easy | 0.9898 | 0.9895 |
+| 2024 Medium | 0.8849 | 0.8854 |
+| 2024 Hard | 0.8775 | 0.8629 |
+| 2025 Easy | 0.9469 | 0.9550 |
+| 2025 Medium | 0.7901 | 0.7901 |
+| 2025 Hard | 0.7999 | 0.8218 |
+| **Avg Easy** | **0.9684** | **0.9723** |
+| **Avg Medium** | **0.8375** | **0.8378** |
+| **Avg Hard** | **0.8387** | **0.8424** |
+| **Macro** | **0.8815** | **0.8841** |
+
+### Comparison with PAN 2025 Top Systems
+
+| Tier | DeSAF (ours) | Team wqd [1] | SCL-DeBERTa [2] | Δ vs best |
+|------|-------------|--------------|-----------------|-----------|
+| Easy | **0.9723** | 0.958 | 0.955 | +0.014 |
+| Medium | **0.8378** | 0.823 | 0.825 | +0.013 |
+| Hard | **0.8424** | 0.830 | 0.829 | +0.012 |
+| Macro | **0.8841** | 0.836 | 0.846 | +0.038 |
+
+> [1] Lin et al. (2025). *Team wqd at Style Change Detection in Multi-Author Writing.* PAN@CLEF 2025.
+> [2] Lin et al. (2025). *SCL-DeBERTa: Multi-Author Writing Style Change Detection Enhanced by Supervised Contrastive Learning.* PAN@CLEF 2025.
+> Note: Team wqd and SCL-DeBERTa report scores on the official TIRA test set. DeSAF evaluates on the same dataset split using independently computed predictions.
+
+### Negative Results
+
+| Approach | Result |
+|----------|--------|
+| Ensemble (curriculum + hard-ft) | Hard-ft forgot Easy tier (F1: 0.9550 → 0.5738) |
+| Gradient Reversal Layer (topic adversarial) | No improvement over baseline fusion |
+| CRF output layer | Marginal gain, not worth complexity |
+
+---
+
+## What We Found
+
+**Attention gate analysis:** Features most active at style change boundaries:
+- **Higher at boundaries:** `fw_do`, `fw_your`, `fw_which`, `fw_where`, `fw_since` — direct address words and relative clause markers signal author switches
+- **Lower at boundaries:** `fw_some`, `fw_many`, `fw_too`, `punct_question` — hedging/quantifier words and question marks indicate same-author continuity
+
+This is consistent with stylometry literature: syntactic and function-word features are more topic-independent than lexical features.
+
+**Error analysis (Hard tier):**
+- False positives: overconfident (mean prob 0.73) — high lexical shift but same author
+- False negatives: uncertain (mean prob 0.17) — authors deliberately mirror each other's style
+- No positional bias — errors distributed uniformly across document positions
 
 ---
 
 ## Datasets
 
-| Dataset | Granularity | Tiers | Access | DOI / Link |
-|---------|-------------|-------|--------|------------|
-| PAN 2023 | Paragraph-level | Easy / Medium / Hard | TIRA registration → Zenodo request | [zenodo.org/records/7729178](https://zenodo.org/records/7729178) |
-| PAN 2024 | Sentence-level | Easy / Medium / Hard | TIRA registration → Zenodo request | [pan.webis.de/clef24](https://pan.webis.de/clef24/pan24-web/style-change-detection.html) |
-| PAN 2025 | Sentence-level | Easy / Medium / Hard | TIRA registration → Zenodo request | [zenodo.org/records/14891299](https://zenodo.org/records/14891299) |
-| MuLD AO3 | Paragraph-level | Cross-domain | HuggingFace (open, no registration) | [ghomasHudson/muld](https://huggingface.co/datasets/ghomasHudson/muld) |
+| Dataset | Granularity | Tiers | Notes |
+|---------|-------------|-------|-------|
+| PAN 2024 | Sentence-level | Easy / Medium / Hard | Primary benchmark |
+| PAN 2025 | Sentence-level | Easy / Medium / Hard | Primary benchmark |
 
-> **Access note for PAN datasets:** Register at [tira.io](https://www.tira.io), then request dataset access on Zenodo using the **same email address**. Datasets contain copyrighted material — research use only, no redistribution.
-
-```python
-# MuLD AO3 — loads directly, no registration needed
-from datasets import load_dataset
-ds = load_dataset("ghomasHudson/muld", "AO3 Style Change Detection")
-```
-
-> **Note on granularity:** PAN 2023 operates at paragraph level; PAN 2024/2025 advance to sentence level — matching our task formulation. All three are used: 2023 for cross-granularity analysis, 2024/2025 as primary benchmarks.
-
-Data is **not committed** to this repo. See `docs/data_acquisition.md` for full download instructions.
+See `docs/data_acquisition.md` for download instructions. Data is **not committed** to this repo.
 
 ---
 
 ## Project Structure
 
 ```
-sass-tad/
+desaf/
 ├── src/
 │   ├── features/
-│   │   ├── stylometric.py        # Main extractor — call this
-│   │   ├── pos_features.py       # POS ratios, trigram entropy
-│   │   ├── surface_features.py   # Length, TTR, punctuation
-│   │   ├── function_words.py     # Top-150 function word frequencies
-│   │   └── readability.py        # Flesch, Gunning Fog, Coleman-Liau
+│   │   ├── stylometric.py              # 193-dim feature extractor
+│   │   ├── pos_features.py
+│   │   ├── surface_features.py
+│   │   ├── function_words.py
+│   │   └── readability.py
 │   ├── models/
-│   │   ├── fusion.py             # Feature fusion layer
-│   │   ├── contrastive.py        # Contrastive style encoder
-│   │   ├── adversarial.py        # GRL + topic classifier head
-│   │   ├── bilstm.py             # Sequence-aware BiLSTM
-│   │   └── sass_tad.py           # Full end-to-end model
+│   │   └── deberta_fusion.py           # DeBERTaFusionE2E + StyleAttentionFusion
 │   ├── training/
-│   │   ├── train.py              # Main training loop
-│   │   ├── losses.py             # Contrastive + adversarial losses
-│   │   └── scheduler.py          # λ schedule for GRL
+│   │   └── losses.py
 │   ├── evaluation/
-│   │   ├── metrics.py            # Macro F1, WindowDiff
-│   │   └── evaluate.py           # Evaluation runner
-│   ├── explainability/
-│   │   ├── shap_analysis.py      # SHAP on baselines (CPU)
-│   │   ├── integrated_gradients.py  # IG on SASS-TAD (GPU)
-│   │   └── attention_viz.py      # Attention weight visualisation
+│   │   └── metrics.py
 │   └── utils/
-│       ├── data_loader.py        # PAN + MuLD dataset loaders
-│       ├── sbert_cache.py        # Precompute + cache embeddings
-│       └── config.py             # Config loading
+│       ├── data_loader.py
+│       └── sbert_cache.py
 ├── scripts/
-│   ├── precompute_embeddings.py  # Run once before Phase 3
-│   └── run_baselines.py          # Phase 3 baseline evaluation
-├── configs/
-│   ├── base.yaml                 # Shared hyperparameters
-│   ├── phase3_baselines.yaml
-│   └── phase4_sass_tad.yaml
-├── tests/
-│   └── test_stylometric.py       # Unit tests (no dataset needed)
-├── notebooks/                    # Exploratory analysis
-├── data/                         # gitignored — local only
-├── results/                      # gitignored — local only
+│   ├── precompute_finetuned_features.py   # Step 1
+│   ├── finetune_hard_oversample.py        # Step 2
+│   ├── threshold_sweep.py                 # Step 3
+│   ├── test_eval.py                       # Step 4
+│   ├── attention_viz.py                   # Attention gate analysis
+│   ├── error_analysis.py                  # FP/FN pattern analysis
+│   └── ensemble_eval.py                   # Negative result — kept for reference
+├── scripts/archive/                        # Old SBERT-based experiments
 ├── docs/
 │   └── data_acquisition.md
+├── tests/
+├── checkpoints/                            # gitignored
+├── data/                                   # gitignored
+├── results/                                # gitignored
 ├── requirements.txt
 └── README.md
+```
+
+---
+
+## Reproduce
+
+**Step 1 — Precompute features using fine-tuned DeBERTa**
+```bash
+python scripts/precompute_finetuned_features.py --checkpoint checkpoints/curriculum_228_best.pt
+```
+
+**Step 2 — Fine-tune fusion head with Hard oversampling**
+```bash
+python scripts/finetune_hard_oversample.py --checkpoint checkpoints/curriculum_228_best.pt
+```
+
+**Step 3 — Find best threshold**
+```bash
+python scripts/threshold_sweep.py
+```
+
+**Step 4 — Evaluate on test set**
+```bash
+python scripts/test_eval.py --threshold 0.40
 ```
 
 ---
@@ -154,7 +197,9 @@ python -m nltk.downloader punkt averaged_perceptron_tagger stopwords
 
 ## Key References
 
-- Altakrori et al. (2021). *The topic confusion task.* EMNLP Findings.
-- Bevendorff et al. (2024). *Overview of PAN 2024.* LNCS 14613.
-- van Leeuwen et al. (2025). *Combining style and semantics for robust authorship verification.* MLWA.
+- Bevendorff et al. (2024). *Overview of PAN 2024 Style Change Detection.* LNCS 14613.
+- Bevendorff et al. (2025). *Overview of PAN 2025 Style Change Detection.*
+- Lin et al. (2025). *Team wqd at Style Change Detection in Multi-Author Writing.* PAN@CLEF 2025.
+- Lin et al. (2025). *SCL-DeBERTa: Multi-Author Writing Style Change Detection Enhanced by Supervised Contrastive Learning.* PAN@CLEF 2025.
+- He et al. (2021). *DeBERTaV3: Improving DeBERTa using ELECTRA-style pre-training.* ICLR.
 - Stamatatos (2009). *A survey of modern authorship attribution methods.* JASIST.
