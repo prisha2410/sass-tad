@@ -256,5 +256,5 @@ python -m nltk.downloader punkt averaged_perceptron_tagger stopwords
 - Hashemi & Shi (2025). *A Survey on Writing Style Change Detection: Current Literature and Future Directions.* Machine Intelligence Research, 22(3), 397-416.
 - He, Gao, & Chen (2021). *DeBERTaV3: Improving DeBERTa using ELECTRA-style pre-training.* ICLR.
 - Stamatatos (2009). *A survey of modern authorship attribution methods.* JASIST.
-```
+
 
