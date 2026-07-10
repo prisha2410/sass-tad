@@ -18,7 +18,7 @@ from src.models.deberta_fusion import DeBERTaFusionE2E
 from src.features.stylometric import StylometricExtractor
 
 DEVICE   = torch.device("cpu")
-FEAT_DIR = ROOT / "data" / "processed" / "features_finetuned"
+FEAT_DIR = ROOT / "data" / "processed" / "features_finetuned_official_test"
 OUT_DIR  = ROOT / "results" / "attention"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
