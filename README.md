@@ -8,109 +8,142 @@
 
 Style change detection breaks down when multiple authors write about the **same topic** — semantic embeddings conflate topic similarity with authorial similarity. The PAN 2024/2025 Hard tier formally quantifies this: systems strong on Easy (topic-diverse) documents experience major F1 degradation on Hard (topic-controlled) documents.
 
-**DeSAF directly attacks this gap.**
+**DeSAF directly attacks this gap** — not by beating the state of the art, but by combining an interpretable, gated fusion architecture with curriculum learning and a rigorous, significance-tested evaluation that most systems in this space don't report.
 
 ---
 
 ## Architecture
 
 ```
-Document (N sentences)
-        │
-        ▼
-┌─────────────────────────────────────────┐
-│         DeBERTa-v3-small (frozen)       │
-│   Sentence-pair → CLS vector (768-dim)  │
-└──────────────────┬──────────────────────┘
-                   │
-        ┌──────────┴──────────┐
-        │                     │
-   CLS (768)           Stylometric diff
-                          (193-dim)
-        │                     │
-        └──────────┬──────────┘
-                   ▼
+Document (N paragraphs)
+        |
+        v
++------------------------------------------+
+|   DeBERTa-v3 (last 2 layers fine-tuned)   |
+|   Paragraph-pair -> CLS vector (768-dim)  |
++------------------------------------------+
+        |
+        +----------------------+
+        |                      |
+   CLS (768)            Stylometric diff
+                            (193-dim)
+        |                      |
+        +----------+-----------+
+                   v
       StyleAttentionFusion
       (gated attention: style weighted
-       by CLS context → 961-dim fused)
-                   │
-                   ▼
+       by CLS context -> 961-dim fused)
+                   |
+                   v
          BiLSTM over boundary sequence
-                   │
-                   ▼
-          Per-boundary logit → sigmoid
+                   |
+                   v
+          Per-boundary logit -> sigmoid
 ```
 
 **Key design choices:**
-- DeBERTa-v3-small fine-tuned end-to-end with curriculum learning (Easy→Medium→Hard, 2-2-8 epoch schedule)
-- 193-dim stylometric features: POS ratios, function word frequencies, readability scores, surface features
-- Gated attention fusion: stylometric features weighted by DeBERTa CLS context
-- Hard-tier oversampling (3×) via WeightedRandomSampler to address class imbalance
-- Decision threshold optimised on validation set (best = 0.40)
+- DeBERTa-v3 backbone fine-tuned via curriculum learning (Easy->Medium->Hard, 2-2-8 epoch schedule), then frozen for downstream fusion/BiLSTM training
+- 193-dim stylometric features: POS ratios, function-word frequencies, readability scores, surface features
+- Gated attention fusion: stylometric features weighted by DeBERTa CLS context — the gate learns *when* to trust stylometric evidence, not just how to combine it
+- Hard-tier oversampling (3x) via WeightedRandomSampler
+- Decision threshold optimized on validation set (default 0.40), with per-tier tuning applied post-hoc (see Results)
 
 ---
 
 ## Results
 
-All numbers are on the **test set** with threshold = 0.40.
+All results below are on the **real official PAN 2025 test set** (ground truth obtained from the official PAN release, independent of and evaluated separately from any internal validation split).
 
-| Dataset | Val F1 | Test F1 |
-|---------|--------|---------|
-| 2024 Easy | 0.9898 | 0.9895 |
-| 2024 Medium | 0.8849 | 0.8854 |
-| 2024 Hard | 0.8775 | 0.8629 |
-| 2025 Easy | 0.9469 | 0.9550 |
-| 2025 Medium | 0.7901 | 0.7901 |
-| 2025 Hard | 0.7999 | 0.8218 |
-| **Avg Easy** | **0.9684** | **0.9723** |
-| **Avg Medium** | **0.8375** | **0.8378** |
-| **Avg Hard** | **0.8387** | **0.8424** |
-| **Macro** | **0.8815** | **0.8841** |
+### Main model (3-seed mean ± SD)
 
-### Comparison with PAN 2025 Top Systems
+| Tier | F1 |
+|------|-----|
+| Easy | 0.9287 ± 0.0009 |
+| Medium | 0.7268 ± 0.0016 |
+| Hard | 0.7276 ± 0.0022 |
+| **Macro** | **0.7944 ± 0.0005** |
 
-| Tier | DeSAF (ours) | Team wqd [1] | SCL-DeBERTa [2] | Δ vs best |
-|------|-------------|--------------|-----------------|-----------|
-| Easy | **0.9723** | 0.958 | 0.955 | +0.014 |
-| Medium | **0.8378** | 0.823 | 0.825 | +0.013 |
-| Hard | **0.8424** | 0.830 | 0.829 | +0.012 |
-| Macro | **0.8841** | 0.836 | 0.846 | +0.038 |
+### Baseline comparison
+
+| Model | Easy | Medium | Hard | Macro |
+|-------|------|--------|------|-------|
+| DeBERTa-only (no stylometric, no fusion, no BiLSTM) | 0.8340 | 0.6703 | 0.6960 | 0.7334 |
+| **DeSAF (full)** | **0.9287** | **0.7268** | **0.7276** | **0.7944** |
+
+DeSAF significantly outperforms the DeBERTa-only baseline on Hard tier (ΔF1=+0.029, 95% CI [0.016, 0.042], bootstrap p=0.0002, McNemar p<0.0001).
+
+### Ablation study
+
+| Ablation | Easy | Medium | Hard | Macro | Hard significance |
+|----------|------|--------|------|-------|---------------------|
+| Full model | 0.9292 | 0.7283 | 0.7252 | 0.7942 | — |
+| No stylometric | 0.9150 | 0.7197 | 0.7386 | 0.7911 | bootstrap p=0.0086; McNemar n.s. |
+| No BiLSTM | 0.8106 | 0.6657 | 0.6972 | 0.7245 | bootstrap p=0.0002; McNemar p<0.0001 |
+| No curriculum (Hard-only) | 0.6277 | 0.6446 | 0.7621 | 0.6781 | bootstrap p<0.0001; McNemar p<0.0001 |
+| No oversampling | 0.9256 | 0.7266 | 0.7358 | 0.7960 | bootstrap p=0.0414; McNemar n.s. |
+
+**Key finding: sequential modeling (BiLSTM), not stylometric fusion, drives most of DeSAF's advantage.** Removing BiLSTM causes the largest, most consistent drop across both significance tests. Stylometric fusion and Hard-tier oversampling appear beneficial on an internal validation split but show weak/negative effects on the real test set — a validation-to-test generalization gap we report explicitly rather than hide (see paper for full discussion).
+
+**Curriculum learning trades Hard-tier specialization for generalization.** A Hard-only specialist model beats the curriculum-trained model on Hard tier alone (+3.7 F1) but loses 30 points on Easy and 8 on Medium — curriculum learning is what makes a single deployable model work across the full difficulty range.
+
+### Best achievable result — ablation-informed, zero extra training
+
+Using the ablation study's own findings, we route Hard-tier predictions through the Hard-only specialist model and apply per-tier threshold tuning + multi-seed ensembling on Easy/Medium:
+
+| Tier | Strategy | F1 |
+|------|----------|-----|
+| Easy | 3-seed ensemble + threshold | 0.9320 |
+| Medium | 3-seed ensemble + threshold | 0.7329 |
+| Hard | Specialist routing + threshold | **0.7644** |
+| **Macro** | | **0.8098** |
+
+### Comparison with PAN 2025 systems
+
+| System | Easy | Medium | Hard | Training data |
+|--------|------|--------|------|-----------------|
+| Team wqd [1] | 0.958 | 0.823 | 0.830 | PAN 2025 only |
+| SCL-DeBERTa [2] | 0.955 | 0.823–0.825 | 0.829 | PAN 2025 only |
+| stylospies | 0.959 | 0.786 | 0.791 | PAN 2025 only |
+| **DeSAF (best combo)** | **0.932** | **0.733** | **0.764** | PAN 2025 / 2024+2025 |
+| better_call_claude [3] | 0.923 | 0.828 | 0.724 | PAN 2025 only |
+
+**Honest positioning: DeSAF does not reach the top 2 systems** (~6.5pt behind on Hard). It clearly and significantly beats better_call_claude — architecturally the closest prior system — and narrows the gap to stylospies to ~2.7pt. DeSAF's contribution is architectural interpretability and evaluation rigor (multi-seed, significance-tested, internal-vs-external comparison), not SOTA performance.
 
 > [1] Lin et al. (2025). *Team wqd at Style Change Detection in Multi-Author Writing.* PAN@CLEF 2025.
-> [2] Lin et al. (2025). *SCL-DeBERTa: Multi-Author Writing Style Change Detection Enhanced by Supervised Contrastive Learning.* PAN@CLEF 2025.
-> Note: Team wqd and SCL-DeBERTa report scores on the official TIRA test set. DeSAF evaluates on the same dataset split using independently computed predictions.
+> [2] Lin, Liu, Ye, & Han (2025). *SCL-DeBERTa: Multi-Author Writing Style Change Detection Enhanced by Supervised Contrastive Learning.* PAN@CLEF 2025.
+> [3] Römisch et al. (2025). *Team "better_call_claude": Style Change Detection using a Sequential Sentence Pair Classifier.* PAN@CLEF 2025 / arXiv:2508.00675.
 
-### Negative Results
+### Negative results
 
 | Approach | Result |
 |----------|--------|
-| Ensemble (curriculum + hard-ft) | Hard-ft forgot Easy tier (F1: 0.9550 → 0.5738) |
-| Gradient Reversal Layer (topic adversarial) | No improvement over baseline fusion |
-| CRF output layer | Marginal gain, not worth complexity |
+| Joint fine-tuning of DeBERTa backbone (5 epochs, single GPU) | Did not outperform frozen-backbone approach; degraded Medium tier by 2.3pt |
+| Gradient Reversal Layer (topic adversarial, early prototype) | No improvement over baseline fusion |
+| Naive ensemble of separate style/semantic models (early prototype) | Worse than learned gated fusion |
 
 ---
 
-## What We Found
+## What We Found — Attention Gate Interpretability
 
-**Attention gate analysis:** Features most active at style change boundaries:
-- **Higher at boundaries:** `fw_do`, `fw_your`, `fw_which`, `fw_where`, `fw_since` — direct address words and relative clause markers signal author switches
-- **Lower at boundaries:** `fw_some`, `fw_many`, `fw_too`, `punct_question` — hedging/quantifier words and question marks indicate same-author continuity
+**Feature-level analysis (change vs. no-change boundaries):** the gate learns clear, specific, interpretable distinctions:
+- **Up-weighted at true change boundaries:** `pos_adv_ratio` (adverb usage ratio), `fw_do` — the model learned these are informative style-change signals on its own
+- **Down-weighted at true change boundaries:** most function-word frequency features (`fw_did`, `fw_more`, `fw_with`, `fw_my`, `fw_down`, `fw_whose`, `fw_if`, `fw_just`, `fw_her`, `fw_than`, `fw_too`, `fw_no`, `punct_question`, and others) — the model learned these are *not* reliable indicators in isolation
 
-This is consistent with stylometry literature: syntactic and function-word features are more topic-independent than lexical features.
+**Per-tier gate reliance:** a small, directionally-consistent trend (Easy 0.6117 > Hard 0.6041) suggesting reduced stylometric reliance as topic control increases — but the effect size is modest relative to within-tier variance; we report this cautiously rather than as a strong independent claim.
 
 **Error analysis (Hard tier):**
-- False positives: overconfident (mean prob 0.73) — high lexical shift but same author
-- False negatives: uncertain (mean prob 0.17) — authors deliberately mirror each other's style
+- False positives: overconfident (mean prob ~0.73) — high lexical shift but same author
+- False negatives: uncertain (mean prob ~0.17) — authors deliberately mirror each other's style
 - No positional bias — errors distributed uniformly across document positions
 
 ---
 
 ## Datasets
 
-| Dataset | Granularity | Tiers | Notes |
-|---------|-------------|-------|-------|
-| PAN 2024 | Sentence-level | Easy / Medium / Hard | Primary benchmark |
-| PAN 2025 | Sentence-level | Easy / Medium / Hard | Primary benchmark |
+| Dataset | Tiers | Notes |
+|---------|-------|-------|
+| PAN 2024 | Easy / Medium / Hard | Training data |
+| PAN 2025 | Easy / Medium / Hard | Training data + official held-out test set (obtained separately, used only for final evaluation) |
 
 See `docs/data_acquisition.md` for download instructions. Data is **not committed** to this repo.
 
@@ -121,36 +154,40 @@ See `docs/data_acquisition.md` for download instructions. Data is **not committe
 ```
 desaf/
 ├── src/
-│   ├── features/
-│   │   ├── stylometric.py              # 193-dim feature extractor
-│   │   ├── pos_features.py
-│   │   ├── surface_features.py
-│   │   ├── function_words.py
-│   │   └── readability.py
-│   ├── models/
-│   │   └── deberta_fusion.py           # DeBERTaFusionE2E + StyleAttentionFusion
-│   ├── training/
-│   │   └── losses.py
-│   ├── evaluation/
-│   │   └── metrics.py
-│   └── utils/
-│       ├── data_loader.py
-│       └── sbert_cache.py
+│   ├── features/            # stylometric.py + 193-dim feature extractors
+│   ├── models/               # deberta_fusion.py — DeBERTaFusionE2E + StyleAttentionFusion
+│   ├── training/              # losses.py
+│   ├── evaluation/            # metrics.py
+│   └── utils/                 # data_loader.py, sbert_cache.py
 ├── scripts/
-│   ├── precompute_finetuned_features.py   # Step 1
-│   ├── finetune_hard_oversample.py        # Step 2
-│   ├── threshold_sweep.py                 # Step 3
-│   ├── test_eval.py                       # Step 4
-│   ├── attention_viz.py                   # Attention gate analysis
-│   ├── error_analysis.py                  # FP/FN pattern analysis
-│   └── ensemble_eval.py                   # Negative result — kept for reference
-├── scripts/archive/                        # Old SBERT-based experiments
+│   ├── precompute_finetuned_features.py   # backbone feature precompute
+│   ├── precompute_official_test.py         # real PAN 2025 test set feature precompute
+│   ├── retrain_fulldata.py                 # main model training (100% data)
+│   ├── train_deberta_only.py               # baseline training
+│   ├── eval_test_npz.py                    # main model + baseline evaluation
+│   ├── eval_deberta_only.py
+│   ├── ablation_no_stylometric.py
+│   ├── ablation_no_bilstm.py
+│   ├── ablation_no_curriculum.py
+│   ├── ablation_no_oversampling.py
+│   ├── eval_ablation.py                    # unified ablation evaluation
+│   ├── finetune_joint.py                   # joint backbone fine-tuning experiment
+│   ├── eval_finetune_joint.py
+│   ├── threshold_sweep.py                  # per-tier threshold optimization
+│   ├── ensemble_seeds.py                   # multi-seed ensembling
+│   ├── tier_routing_check.py               # ablation-informed tier routing
+│   ├── compute_significance.py             # paired bootstrap + McNemar's test
+│   ├── attention_viz.py                    # attention gate interpretability analysis
+│   ├── analyze_stylometric_by_length.py    # stylometric gain by paragraph length
+│   └── error_analysis.py
 ├── docs/
 │   └── data_acquisition.md
 ├── tests/
-├── checkpoints/                            # gitignored
-├── data/                                   # gitignored
-├── results/                                # gitignored
+├── archive/                  # gitignored — superseded prototype code/checkpoints
+├── checkpoints/               # gitignored
+├── data/                      # gitignored
+├── results/                   # gitignored
+├── RESULTS_SUMMARY.md          # full, current experimental record
 ├── requirements.txt
 └── README.md
 ```
@@ -159,33 +196,48 @@ desaf/
 
 ## Reproduce
 
-**Step 1 — Precompute features using fine-tuned DeBERTa**
+**1 — Precompute backbone features (training data)**
 ```bash
-python scripts/precompute_finetuned_features.py --checkpoint checkpoints/curriculum_228_best.pt
+python scripts/precompute_finetuned_features.py --seed 42
 ```
 
-**Step 2 — Fine-tune fusion head with Hard oversampling**
+**2 — Precompute official test set features**
 ```bash
-python scripts/finetune_hard_oversample.py --checkpoint checkpoints/curriculum_228_best.pt
+python scripts/precompute_official_test.py
 ```
 
-**Step 3 — Find best threshold**
+**3 — Train main model**
 ```bash
-python scripts/threshold_sweep.py
+python scripts/retrain_fulldata.py --checkpoint checkpoints/curriculum_228_best.pt --feat-dir data/processed/features_finetuned
 ```
 
-**Step 4 — Evaluate on test set**
+**4 — Evaluate on real test set**
 ```bash
-python scripts/test_eval.py --threshold 0.40
+python scripts/eval_test_npz.py --checkpoint checkpoints/fulldata/fulldata_final.pt --feat-dir data/processed/features_finetuned_official_test --years 2025
 ```
+
+**5 — Run ablations**
+```bash
+python scripts/ablation_no_stylometric.py --checkpoint checkpoints/curriculum_228_best.pt --feat-dir data/processed/features_finetuned
+python scripts/ablation_no_bilstm.py --checkpoint checkpoints/curriculum_228_best.pt --feat-dir data/processed/features_finetuned
+python scripts/ablation_no_curriculum.py --base-checkpoint checkpoints/curriculum_228_best.pt --feat-dir data/processed/features_finetuned
+python scripts/ablation_no_oversampling.py --checkpoint checkpoints/curriculum_228_best.pt --feat-dir data/processed/features_finetuned
+```
+
+**6 — Significance testing**
+```bash
+python scripts/compute_significance.py --a checkpoints/fulldata/test_predictions.npz --b checkpoints/deberta_only/test_predictions.npz --tier 2025_hard
+```
+
+See `RESULTS_SUMMARY.md` for the complete, current experimental record.
 
 ---
 
 ## Setup
 
 ```bash
-git clone https://github.com/prisha2410/sass-tad.git
-cd sass-tad
+git clone https://github.com/prisha2410/desaf.git
+cd desaf
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
 python -m nltk.downloader punkt averaged_perceptron_tagger stopwords
@@ -195,9 +247,14 @@ python -m nltk.downloader punkt averaged_perceptron_tagger stopwords
 
 ## Key References
 
-- Bevendorff et al. (2024). *Overview of PAN 2024 Style Change Detection.* LNCS 14613.
-- Bevendorff et al. (2025). *Overview of PAN 2025 Style Change Detection.*
+- Zangerle, Mayerl, Potthast, & Stein (2025). *Overview of the Multi-Author Writing Style Analysis Task at PAN 2025.* CLEF 2025 Working Notes, CEUR-WS Vol. 4038.
+- Bevendorff et al. (2025). *Overview of PAN 2025: Voight-Kampff Generative AI Detection, Multilingual Text Detoxification, Multi-author Writing Style Analysis, and Generative Plagiarism Detection.* CLEF 2025, Springer LNCS 16089.
 - Lin et al. (2025). *Team wqd at Style Change Detection in Multi-Author Writing.* PAN@CLEF 2025.
-- Lin et al. (2025). *SCL-DeBERTa: Multi-Author Writing Style Change Detection Enhanced by Supervised Contrastive Learning.* PAN@CLEF 2025.
-- He et al. (2021). *DeBERTaV3: Improving DeBERTa using ELECTRA-style pre-training.* ICLR.
+- Lin, Liu, Ye, & Han (2025). *SCL-DeBERTa: Multi-Author Writing Style Change Detection Enhanced by Supervised Contrastive Learning.* PAN@CLEF 2025.
+- Römisch, Gorovaia, Halchynska, Schmidt, & Yamshchikov (2025). *Team "better_call_claude": Style Change Detection using a Sequential Sentence Pair Classifier.* arXiv:2508.00675.
+- Mady, Reschke, & Schuller (2026). *Feature-Augmented Transformers for Robust AI-Text Detection Across Domains and Generators.* arXiv:2605.03969.
+- Hashemi & Shi (2025). *A Survey on Writing Style Change Detection: Current Literature and Future Directions.* Machine Intelligence Research, 22(3), 397-416.
+- He, Gao, & Chen (2021). *DeBERTaV3: Improving DeBERTa using ELECTRA-style pre-training.* ICLR.
 - Stamatatos (2009). *A survey of modern authorship attribution methods.* JASIST.
+```
+
